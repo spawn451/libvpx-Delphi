@@ -7,11 +7,10 @@ unit vp8cx;
 interface
 
 uses
-  Windows,vpx_codec, vpx_encoder;
+  Windows,vpx_codec,vpx_encoder;
 
 const
   DLL = 'libvpx.dll';
-
 
 const
   // Algorithm Flags
@@ -26,7 +25,6 @@ const
   VP8_EFLAG_NO_UPD_ENTROPY = 1 shl 20;
 
   //VP8E_SET_SCREEN_CONTENT_MODE = 2;
-
 
 type
   // Encoder control IDs
@@ -98,7 +96,6 @@ type
     VP9E_SET_QUANTIZER_ONE_PASS
   );
 
-
   // Scaling mode enum
   VPX_SCALING_MODE = (
     VP8E_NORMAL = 0,
@@ -114,7 +111,6 @@ type
     VP9E_TEMPORAL_LAYERING_MODE_0101 = 2,
     VP9E_TEMPORAL_LAYERING_MODE_0212 = 3
   );
-
 
   // ROI map structure
   Pvpx_roi_map = ^vpx_roi_map_t;
@@ -137,7 +133,6 @@ type
     rows: Cardinal;            // number of rows
     cols: Cardinal;            // number of cols
   end;
-
 
   // Scaling mode structure
   Pvpx_scaling_mode = ^vpx_scaling_mode_t;
@@ -162,7 +157,6 @@ type
     VP9E_CONTENT_INVALID
   );
 
-
   // Tuning options
   vp8e_tuning = (
     VP8_TUNE_PSNR,
@@ -176,7 +170,6 @@ type
     FULL_SUPERFRAME_DROP,        // Only full superframe can drop
     CONSTRAINED_FROM_ABOVE_DROP  // Lower layers constrained to drop if current layer drops
   );
-
 
   type
   vpx_svc_layer_id_t = record
@@ -625,9 +618,5 @@ function vpx_codec_control_VP9E_SET_QUANTIZER_ONE_PASS(ctx: vpx_codec_ctx_t; ctr
 begin
   Result := vpx_codec_control_(@ctx, ctrl_id, @data);
 end;
-
-
-
-
 
 end.

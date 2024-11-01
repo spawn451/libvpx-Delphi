@@ -6,7 +6,7 @@ unit vp8dx;
 interface
 
 uses
-  Winapi.Windows;
+  Windows;
 
 const
   DLL = 'libvpx.dll';

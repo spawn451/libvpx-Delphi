@@ -3,7 +3,7 @@ unit VPXEncoder;
 interface
 
 uses
-  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
+  Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Math, Vcl.StdCtrls,libyuv, vp8cx, vp8dx, vpx_decoder, vpx_encoder, vpx_codec, vpx_image;
 
 type
@@ -45,6 +45,7 @@ type
     FConfig: TVpxEncoderConfig;
     FInitialized: Boolean;
     FCodecType: TVpxCodecType;
+    FFrameCount: Int64;
 
     procedure InitializeEncoder;
     function EncodeFrame(const YuvData: PByte; Width, Height: Integer;
@@ -129,7 +130,7 @@ begin
     case FCodecType of
       vctVP8:
       begin
-        g_profile := 2;
+        g_profile := 0;
       end;
 
       vctVP9:
@@ -143,7 +144,7 @@ begin
     g_timebase.den := 30;
     g_pass := VPX_RC_ONE_PASS;
     g_lag_in_frames := 0;
-    g_error_resilient := VPX_ERROR_RESILIENT_DEFAULT;
+    //g_error_resilient := VPX_ERROR_RESILIENT_DEFAULT;
 
     // Performance settings
     g_threads := (Max(1, System.CPUCount + 1) div 2);
@@ -158,7 +159,7 @@ begin
 
 
     // Bitrate and quality settings
-    rc_target_bitrate := 1000;
+    rc_target_bitrate := 10000;
     rc_end_usage := VPX_CBR;
     rc_undershoot_pct := 100;
     rc_overshoot_pct := 15;
@@ -248,21 +249,28 @@ begin
   AStream.WriteBuffer(Header, SizeOf(Header));
 end;
 
-class procedure TIVFWriter.WriteFrame(AStream: TStream; Data: Pointer;
-  Size: Integer; Timestamp: Int64);
+class procedure TIVFWriter.WriteFrame(AStream: TStream; Data: Pointer; Size: Integer; Timestamp: Int64);
 var
-  FrameHeader: packed record
-    FrameSize: Cardinal;
-    Timestamp: Int64;
-  end;
+  i: Integer;
+  ByteValue: Byte;
 begin
-  FrameHeader.FrameSize := Size;
-  FrameHeader.Timestamp := Timestamp;
+  // Write frame size (4 bytes, little-endian)
+  for i := 0 to 3 do
+  begin
+    ByteValue := (Size shr (i * 8)) and $FF;
+    AStream.WriteBuffer(ByteValue, SizeOf(Byte));
+  end;
 
-  AStream.WriteBuffer(FrameHeader, SizeOf(FrameHeader));
+  // Write timestamp (8 bytes, little-endian)
+  for i := 0 to 7 do
+  begin
+    ByteValue := (Timestamp shr (i * 8)) and $FF;
+    AStream.WriteBuffer(ByteValue, SizeOf(Byte));
+  end;
+
+  // Write the actual frame data
   AStream.WriteBuffer(Data^, Size);
 end;
-
 { TVpxEncoder }
 
 constructor TVpxEncoder.Create(ACodecType: TVpxCodecType = vctVP8);
@@ -364,31 +372,65 @@ var
   Res: vpx_codec_err_t;
   Pkt: PVpxCodecCxPkt;
   Iter: vpx_codec_iter_t;
+  PacketFound: Boolean;
 begin
   Result := TMemoryStream.Create;
   try
+    if YuvData = nil then
+      raise EVpxEncoderError.Create('YUV data is nil');
+
+    if (Width <= 0) or (Height <= 0) then
+      raise EVpxEncoderError.Create('Invalid dimensions');
+
+    if not FInitialized then
+      raise EVpxEncoderError.Create('Encoder not initialized');
+
     FillChar(Raw, SizeOf(Raw), 0);
-    vpx_img_wrap(@Raw, VPX_IMG_FMT_I420, Width, Height, 1, YuvData);
+
+    if vpx_img_wrap(@Raw, VPX_IMG_FMT_I420, Width, Height, 1, YuvData) = nil then
+      raise EVpxEncoderError.Create('Failed to wrap YUV image');
 
     Res := vpx_codec_err_t(vpx_codec_encode(@FCodec, @Raw, Timestamp, 1, 0,
       VPX_DL_REALTIME));
-    if Res <> VPX_CODEC_OK then
-      raise EVpxEncoderError.CreateFmt('Failed to encode frame: %s',
-        [vpx_codec_err_to_string(Res)]);
 
-    Iter := nil;
-    Pkt := vpx_codec_get_cx_data(@FCodec, @Iter);
-    while Pkt <> nil do
+    if Res <> VPX_CODEC_OK then
     begin
-      if Pkt^.kind = VPX_CODEC_CX_FRAME_PKT then
-        TIVFWriter.WriteFrame(Result, Pkt^.frame.buf, Pkt^.frame.sz,
-          Pkt^.frame.pts);
+      var ErrorMsg := string(vpx_codec_error(@FCodec));
+      var ErrorDetail := string(vpx_codec_error_detail(@FCodec));
+      raise EVpxEncoderError.CreateFmt('Encode failed: %s. Details: %s',
+        [ErrorMsg, ErrorDetail]);
+    end;
+
+    PacketFound := False;
+    Iter := nil;
+
+    try
       Pkt := vpx_codec_get_cx_data(@FCodec, @Iter);
+      while Pkt <> nil do
+      begin
+        if Pkt^.kind = VPX_CODEC_CX_FRAME_PKT then
+        begin
+          if (Pkt^.frame.buf = nil) or (Pkt^.frame.sz = 0) then
+            raise EVpxEncoderError.Create('Invalid packet data received');
+
+          TIVFWriter.WriteFrame(Result, Pkt^.frame.buf, Pkt^.frame.sz,
+            Pkt^.frame.pts);
+          PacketFound := True;
+        end;
+        Pkt := vpx_codec_get_cx_data(@FCodec, @Iter);
+      end;
+
+      if not PacketFound then
+        raise EVpxEncoderError.Create('No valid packets received from encoder');
+
+    except
+      on E: Exception do
+        raise EVpxEncoderError.CreateFmt('Error processing encoded frame: %s', [E.Message]);
     end;
 
     Result.Position := 0;
   except
-    Result.Free;
+    FreeAndNil(Result);
     raise;
   end;
 end;
@@ -408,6 +450,19 @@ begin
     raise EVpxEncoderError.Create('Bitmap must be 32-bit format');
 
   try
+    // Check if we need to reinitialize the encoder due to size change
+    if Assigned(FConfig) and
+       ((FConfig.Config.g_w <> ABitmap.Width) or
+        (FConfig.Config.g_h <> ABitmap.Height)) then
+    begin
+      // Size changed - need to reinitialize
+      if FInitialized then
+        vpx_codec_destroy(@FCodec);
+      FConfig.Free;
+      FConfig := nil;
+      FInitialized := False;
+    end;
+
     // Create and initialize encoder if needed
     if not Assigned(FConfig) then
     begin
@@ -429,10 +484,11 @@ begin
       TIVFWriter.WriteHeader(Result, ABitmap.Width, ABitmap.Height);
 
       // Encode frame and copy to result stream
-      EncodedFrame := EncodeFrame(YuvData, ABitmap.Width, ABitmap.Height);
+      EncodedFrame := EncodeFrame(YuvData, ABitmap.Width, ABitmap.Height, FFrameCount);
       try
         Result.CopyFrom(EncodedFrame, 0);
         Result.Position := 0;
+        Inc(FFrameCount);
       finally
         EncodedFrame.Free;
       end;
@@ -445,7 +501,6 @@ begin
       FreeMem(YuvData);
   end;
 end;
-
 
 end.
 
