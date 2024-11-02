@@ -74,7 +74,7 @@ begin
 
 ## Demo
 
-In the demo folder a GUI exemple to encode screen capture to IVF and decode the IVF to bitmap.
+In the demo folder a GUI example to encode screen capture to IVF and decode the IVF to bitmap.
 
 <p align="center">
   <img src="demo.png" alt="Screenshot of Process Demoter" style="max-width:100%; height:auto;">
