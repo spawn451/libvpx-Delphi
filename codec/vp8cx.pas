@@ -7,7 +7,7 @@ unit vp8cx;
 interface
 
 uses
-  Windows,vpx_codec,vpx_encoder;
+  vpx_codec,vpx_encoder;
 
 const
   DLL = 'libvpx.dll';

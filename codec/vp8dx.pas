@@ -5,9 +5,6 @@ unit vp8dx;
 
 interface
 
-uses
-  Windows;
-
 const
   DLL = 'libvpx.dll';
 

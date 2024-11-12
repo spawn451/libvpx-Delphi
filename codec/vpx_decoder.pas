@@ -6,7 +6,7 @@ unit vpx_decoder;
 interface
 
 uses
-  Windows, vpx_image;
+  windows,vpx_image;
 
 const
   DLL = 'libvpx.dll';
