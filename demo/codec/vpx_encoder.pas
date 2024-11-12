@@ -6,7 +6,7 @@ unit vpx_encoder;
 interface
 
 uses
-  Windows, SysUtils, vpx_codec;
+  vpx_codec;
 
 const
   DLL = 'libvpx.dll';

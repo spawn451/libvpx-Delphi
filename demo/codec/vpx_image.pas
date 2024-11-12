@@ -5,7 +5,6 @@ unit vpx_image;
 
 interface
 
-
 const
   DLL = 'libvpx.dll';
 

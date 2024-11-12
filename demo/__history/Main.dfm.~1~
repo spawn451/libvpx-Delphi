@@ -2,11 +2,9 @@ object Form1: TForm1
   Left = 0
   Top = 0
   Caption = 'VPX_ARGB_IVF_v1.0'
-  ClientHeight = 461
+  ClientHeight = 440
   ClientWidth = 624
   Color = clBtnFace
-  Constraints.MaxHeight = 500
-  Constraints.MaxWidth = 640
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
   Font.Height = -12

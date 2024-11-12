@@ -6,11 +6,10 @@ unit vpx_decoder;
 interface
 
 uses
-  Winapi.Windows, vpx_image;
+  windows,vpx_image;
 
 const
   DLL = 'libvpx.dll';
-
 
   VPX_IMAGE_ABI_VERSION = 5;
   VPX_CODEC_ABI_VERSION = 4 + VPX_IMAGE_ABI_VERSION;
