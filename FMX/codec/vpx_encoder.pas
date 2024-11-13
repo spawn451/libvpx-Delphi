@@ -12,7 +12,7 @@ const
 {$IFDEF MSWINDOWS}
   VPX_LIB = 'libvpx.dll';
 {$ELSE}
-  VPX_LIB = 'libvpx.so.7.1.0';  // or whatever the exact library name is on your Linux system
+  VPX_LIB = 'libvpx.so.7.1.0';
 {$ENDIF}
 
   VPX_TS_MAX_PERIODICITY = 16;

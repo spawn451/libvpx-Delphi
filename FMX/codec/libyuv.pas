@@ -7,7 +7,7 @@ const
 {$IFDEF MSWINDOWS}
   YUV_LIB = 'libyuv.dll';
 {$ELSE}
-  YUV_LIB = 'libyuv.so.0';  // or whatever the exact library name is on your Linux system
+  YUV_LIB = 'libyuv.so.0';
 {$ENDIF}
 
 
