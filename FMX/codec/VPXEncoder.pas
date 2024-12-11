@@ -59,36 +59,89 @@ type
 
 implementation
 
-{ ConvertToYUVUsingLibYUV }
+function AlignDimension(dim: Integer): Integer;
+begin
+  // Round up to nearest multiple of 2
+  Result := (dim + 1) and not 1;
+end;
 
-function ConvertToYUVUsingLibYUV(BmpData: PByte; Width, Height: Integer): PByte;
+{ ConvertARGBToI420 }
+
+function ConvertARGBToI420(BmpData: PByte; Width, Height: Integer): PByte;
 var
   YUVSize: Integer;
-  YUVData: PByte;
+  YuvData: PByte;
+  AlignedWidth, AlignedHeight: Integer;
+  TempBuffer: PByte;
+  SrcStride, DstStride: Integer;
+  Y: Integer;
 begin
-  // Calculate YUV size: Y plane + U plane + V plane
-  YUVSize := Width * Height * 3 div 2;
+  // Calculate aligned dimensions
+  AlignedWidth := AlignDimension(Width);
+  AlignedHeight := AlignDimension(Height);
+
+  // Calculate YUV size using aligned dimensions
+  YUVSize := AlignedWidth * AlignedHeight * 3 div 2;
 
   // Allocate memory for YUV data
-  GetMem(YUVData, YUVSize);
+  GetMem(YuvData, YUVSize);
 
-  if YUVData = nil then
+  if YuvData = nil then
   begin
     Result := nil;
     Exit;
   end;
 
-  // Convert 32-bit RGBA to I420 (YUV 4:2:0)
-  ARGBToI420(
-    BmpData, Width * 4,                       // 32-bit data (RGBA)
-    YUVData, Width,                           // Y plane
-    YUVData + Width * Height, Width div 2,    // U plane
-    YUVData + Width * Height + (Width div 2) * (Height div 2), Width div 2,  // V plane
-    Width, Height
-  );
+  try
+    // Initialize YUV buffer to zeros
+    FillChar(YuvData^, YUVSize, 0);
 
-  // Return the converted YUV data
-  Result := YUVData;
+    // If dimensions are already aligned, do direct conversion
+    if (Width = AlignedWidth) and (Height = AlignedHeight) then
+    begin
+      ARGBToI420(BmpData, Width * 4,
+        YuvData, AlignedWidth,
+        YuvData + AlignedWidth * AlignedHeight, AlignedWidth div 2,
+        YuvData + AlignedWidth * AlignedHeight + (AlignedWidth div 2) * (AlignedHeight div 2),
+        AlignedWidth div 2,
+        Width, Height);
+    end
+    else
+    begin
+      // Allocate temporary buffer for aligned data
+      GetMem(TempBuffer, AlignedWidth * AlignedHeight * 4);
+      try
+        // Copy and pad the source data
+        SrcStride := Width * 4;
+        DstStride := AlignedWidth * 4;
+
+        FillChar(TempBuffer^, AlignedWidth * AlignedHeight * 4, 0);
+
+        for Y := 0 to Height - 1 do
+        begin
+          Move(PByte(NativeUInt(BmpData) + Y * SrcStride)^,
+               PByte(NativeUInt(TempBuffer) + Y * DstStride)^,
+               SrcStride);
+        end;
+
+        // Convert padded data
+        ARGBToI420(TempBuffer, AlignedWidth * 4,
+          YuvData, AlignedWidth,
+          YuvData + AlignedWidth * AlignedHeight, AlignedWidth div 2,
+          YuvData + AlignedWidth * AlignedHeight + (AlignedWidth div 2) * (AlignedHeight div 2),
+          AlignedWidth div 2,
+          AlignedWidth, AlignedHeight);
+
+      finally
+        FreeMem(TempBuffer);
+      end;
+    end;
+
+    Result := YuvData;
+  except
+    FreeMem(YuvData);
+    Result := nil;
+  end;
 end;
 
 { TVpxEncoderConfig }
@@ -98,10 +151,15 @@ constructor TVpxEncoderConfig.Create(Width, Height: Integer; ACodec: Pvpx_codec_
 var
   Res: vpx_codec_err_t;
   CodecIface: Pvpx_codec_iface_t;  // Changed to pointer type
+  AlignedWidth, AlignedHeight: Integer;
 begin
   inherited Create;
   FCodec := ACodec;
   FCodecType := ACodecType;
+
+  // Align dimensions first
+  AlignedWidth := (Width + 1) and not 1;
+  AlignedHeight := (Height + 1) and not 1;
 
   // Select codec interface based on type
   case FCodecType of
@@ -116,8 +174,9 @@ begin
     raise EVpxEncoderError.CreateFmt('Failed to get default encoder configuration: %s',
                                     [vpx_codec_err_to_string(Res)]);
 
-  FConfig.g_w := Width;
-  FConfig.g_h := Height;
+  // Use aligned dimensions
+  FConfig.g_w := AlignedWidth;
+  FConfig.g_h := AlignedHeight;
   ApplySettings;
 end;
 
@@ -129,22 +188,22 @@ begin
   begin
     case FCodecType of
       vctVP8:
-      begin
-        g_profile := 0;
-      end;
+        begin
+          g_profile := 2;
+        end;
 
       vctVP9:
-      begin
-        g_profile := kVp9I420ProfileNumber;
-      end;
+        begin
+          g_profile := kVp9I420ProfileNumber;
+        end;
     end;
 
     // Common settings
     g_timebase.num := 1;
-    g_timebase.den := 30;
+    g_timebase.den := 1000;
     g_pass := VPX_RC_ONE_PASS;
     g_lag_in_frames := 0;
-    //g_error_resilient := VPX_ERROR_RESILIENT_DEFAULT;
+    g_error_resilient := VPX_ERROR_RESILIENT_DEFAULT;
 
     // Performance settings
     g_threads := (Max(1, System.CPUCount + 1) div 2);
@@ -153,18 +212,33 @@ begin
     // Keyframe settings
     kf_min_dist := 10000;
     kf_max_dist := 10000;
-    //kf_min_dist := g_timebase.den * 60;
-    //kf_max_dist := g_timebase.den * 60;
-    //kf_mode := VPX_KF_AUTO;
-
+    kf_mode := VPX_KF_DISABLED;
 
     // Bitrate and quality settings
-    rc_target_bitrate := 10000;
+    //rc_target_bitrate := 10000;
+    rc_target_bitrate := 1469;
     rc_end_usage := VPX_CBR;
     rc_undershoot_pct := 100;
     rc_overshoot_pct := 15;
-    rc_min_quantizer := 10;
-    rc_max_quantizer := 30;
+
+     {
+      1. Quality::Best
+          q_min = 12: Minimum quantizer, aiming for very high quality
+          q_max = 25: Maximum quantizer, allowing some compression but still maintaining quality
+
+      2. Quality::Balanced
+
+          q_min = 12: Same minimum quantizer as Best, ensuring good quality
+          q_max = 35: Higher maximum quantizer, allowing more compression than Best
+
+      3. Quality::Low
+
+          q_min = 18: Higher minimum quantizer, reducing quality to allow more compression
+          q_max = 45: Much higher maximum quantizer, enabling significant compression.
+     }
+
+     rc_min_quantizer := 12;
+     rc_max_quantizer := 25;
 
   end;
 end;
@@ -196,7 +270,7 @@ begin
     end;
 
     // Convert 32-bit bitmap to YUV 4:2:0
-    Result := ConvertToYUVUsingLibYUV(BmpData, Width, Height);
+    Result := ConvertARGBToI420(BmpData, Width, Height);
     if Result = nil then
       raise EVpxEncoderError.Create('Failed to convert frame to YUV');
 
@@ -439,6 +513,7 @@ function TVpxEncoder.Encode(const ABitmap: TBitmap): TMemoryStream;
 var
   YuvData: PByte;
   EncodedFrame: TMemoryStream;
+  AlignedWidth, AlignedHeight: Integer;
 begin
   Result := nil;
   YuvData := nil;
@@ -449,13 +524,14 @@ begin
   if ABitmap.PixelFormat <> pf32bit then
     raise EVpxEncoderError.Create('Bitmap must be 32-bit format');
 
-  try
+try
+    AlignedWidth := (ABitmap.Width + 1) and not 1;
+    AlignedHeight := (ABitmap.Height + 1) and not 1;
+
     // Check if we need to reinitialize the encoder due to size change
-    if Assigned(FConfig) and
-       ((FConfig.Config.g_w <> ABitmap.Width) or
-        (FConfig.Config.g_h <> ABitmap.Height)) then
+    if Assigned(FConfig) and ((FConfig.Config.g_w <> AlignedWidth) or
+      (FConfig.Config.g_h <> AlignedHeight)) then
     begin
-      // Size changed - need to reinitialize
       if FInitialized then
         vpx_codec_destroy(@FCodec);
       FConfig.Free;
@@ -503,4 +579,3 @@ begin
 end;
 
 end.
-
